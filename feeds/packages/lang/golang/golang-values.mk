@@ -21,6 +21,7 @@ unexport \
   GOARCH \
   GOBIN \
   GOCACHE \
+  GOMODCACHE \
   GODEBUG \
   GOENV \
   GOFLAGS \
@@ -35,6 +36,7 @@ unexport \
 #   GONOPROXY
 #   GOSUMDB
 #   GONOSUMDB
+#   GOVCS
 
 # Environment variables for use with cgo:
 unexport \
@@ -110,13 +112,13 @@ unexport \
   BOOT_GO_GCFLAGS \
   BOOT_GO_LDFLAGS
 
+# From https://golang.org/src/cmd/dist/buildruntime.go
+unexport \
+  GOEXPERIMENT
+
 # From https://golang.org/src/cmd/dist/buildtool.go
 unexport \
   GOBOOTSTRAP_TOOLEXEC
-
-# From https://golang.org/src/cmd/internal/objabi/util.go
-unexport \
-  GOEXPERIMENT
 
 
 # GOOS / GOARCH
@@ -147,8 +149,11 @@ else
 endif
 
 ifeq ($(GO_ARCH),386)
-  # ensure binaries can run on older CPUs
-  GO_386:=387
+  ifeq ($(CONFIG_TARGET_x86_geode)$(CONFIG_TARGET_x86_legacy),y)
+    GO_386:=softfloat
+  else
+    GO_386:=sse2
+  endif
 
   # -fno-plt: causes "unexpected GOT reloc for non-dynamic symbol" errors
   GO_CFLAGS_TO_REMOVE:=-fno-plt
@@ -195,17 +200,20 @@ GO_ARCH_DEPENDS:=@(aarch64||arm||i386||i686||mips||mips64||mips64el||mipsel||pow
 # ASLR/PIE
 
 GO_PIE_SUPPORTED_OS_ARCH:= \
-  android_386 android_amd64 android_arm android_arm64 \
-  linux_386   linux_amd64   linux_arm   linux_arm64 \
+  android_386  android_amd64  android_arm  android_arm64 \
+  linux_386    linux_amd64    linux_arm    linux_arm64 \
   \
-  darwin_amd64 \
+  windows_386  windows_amd64  windows_arm \
+  \
+  darwin_amd64 darwin_arm64 \
+  \
   freebsd_amd64 \
   \
   aix_ppc64 \
   \
-  linux_ppc64le linux_s390x
+  linux_ppc64le linux_riscv64 linux_s390x
 
-go_pie_install_suffix=$(if $(filter $(1),aix_ppc64),,shared)
+go_pie_install_suffix=$(if $(filter $(1),aix_ppc64 windows_386 windows_amd64 windows_arm),,shared)
 
 ifneq ($(filter $(GO_HOST_OS_ARCH),$(GO_PIE_SUPPORTED_OS_ARCH)),)
   GO_HOST_PIE_SUPPORTED:=1
@@ -216,3 +224,36 @@ ifneq ($(filter $(GO_OS_ARCH),$(GO_PIE_SUPPORTED_OS_ARCH)),)
   GO_TARGET_PIE_SUPPORTED:=1
   GO_TARGET_PIE_INSTALL_SUFFIX:=$(call go_pie_install_suffix,$(GO_OS_ARCH))
 endif
+
+
+# Spectre mitigations
+
+GO_SPECTRE_SUPPORTED_ARCH:=amd64
+
+ifneq ($(filter $(GO_HOST_ARCH),$(GO_SPECTRE_SUPPORTED_ARCH)),)
+  GO_HOST_SPECTRE_SUPPORTED:=1
+endif
+
+ifneq ($(filter $(GO_ARCH),$(GO_SPECTRE_SUPPORTED_ARCH)),)
+  GO_TARGET_SPECTRE_SUPPORTED:=1
+endif
+
+
+# General build info
+
+GO_BUILD_CACHE_DIR:=$(or $(call qstrip,$(CONFIG_GOLANG_BUILD_CACHE_DIR)),$(TMP_DIR)/go-build)
+GO_MOD_CACHE_DIR:=$(DL_DIR)/go-mod-cache
+
+GO_MOD_ARGS= \
+	-modcacherw
+
+GO_GENERAL_BUILD_CONFIG_VARS= \
+	CONFIG_GOLANG_MOD_CACHE_WORLD_READABLE="$(CONFIG_GOLANG_MOD_CACHE_WORLD_READABLE)" \
+	GO_BUILD_CACHE_DIR="$(GO_BUILD_CACHE_DIR)" \
+	GO_MOD_CACHE_DIR="$(GO_MOD_CACHE_DIR)" \
+	GO_MOD_ARGS="$(GO_MOD_ARGS)"
+
+define Go/CacheCleanup
+	$(GO_GENERAL_BUILD_CONFIG_VARS) \
+	$(SHELL) $(GO_INCLUDE_DIR)/golang-build.sh cache_cleanup
+endef
