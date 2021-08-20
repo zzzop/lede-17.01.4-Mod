@@ -1,8 +1,18 @@
 name: Build LEDE wr1200js
 
-on:
+on: 
+  release:
+    types: [published]
   push:
-    branches: [master]
+    tags:
+    - 'v*'
+  #  branches: 
+  #    - master
+#  schedule:
+#    - cron: 0 8 * * 5
+  watch:
+    types: [started]
+
 
 env:
   TARGET_DEVICE: wr1200js
